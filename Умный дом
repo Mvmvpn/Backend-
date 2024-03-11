@@ -1,0 +1,71 @@
+package main
+
+import (
+    "context"
+    "encoding/json"
+    "fmt"
+    "net/http"
+    "time"
+)
+
+// SensorData описывает структуру данных датчика
+type SensorData struct {
+    SensorID      string  `json:"sensorId"`
+    TemperatureC  float64 `json:"temperatureC"`
+}
+
+// fetchTemperature осуществляет HTTP GET запрос к URL датчика
+func fetchTemperature(ctx context.Context, url string, resultChan chan<- SensorData, errChan chan<- error) {
+    req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+    if err != nil {
+        errChan <- err
+        return
+    }
+
+    resp, err := http.DefaultClient.Do(req)
+    if err != nil {
+        errChan <- err
+        return
+    }
+    defer resp.Body.Close()
+
+    var data SensorData
+    if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+        errChan <- err
+        return
+    }
+
+    resultChan <- data
+}
+
+func main() {
+    urls := []string{
+        "http://example.com/sensor1",
+        "http://example.com/sensor2",
+        // Добавьте дополнительные URL датчиков здесь
+    }
+
+    // Создаем контекст с таймаутом
+    ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+    defer cancel()
+
+    resultChan := make(chan SensorData)
+    errChan := make(chan error)
+
+    for _, url := range urls {
+        go fetchTemperature(ctx, url, resultChan, errChan)
+    }
+
+    // Считаем результаты
+    for i := 0; i < len(urls); i++ {
+        select {
+        case result := <-resultChan:
+            fmt.Printf("Sensor ID: %s, Temperature: %f°C\n", result.SensorID, result.TemperatureC)
+        case err := <-errChan:
+            fmt.Printf("Error fetching temperature: %v\n", err)
+        case <-ctx.Done():
+            fmt.Println("Operation timed out or cancelled")
+            return
+        }
+    }
+}
